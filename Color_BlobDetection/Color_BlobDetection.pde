@@ -14,6 +14,7 @@
  **/
 
 import processing.video.*;
+import org.openkinect.processing.*;
 
 Capture video;
 
@@ -27,17 +28,12 @@ float distanceThreshold = 50;
 
 ArrayList<Blob> blobs = new ArrayList<Blob>();
 
-int mode = 1;
-
-PImage backgroundToSubtract;
-
 void setup() {
   size(640, 480);
 
   setupCamera(); 
 
   trackColor = color(183, 12, 83);
-  
 }
 
 void captureEvent(Capture video) {
@@ -63,15 +59,10 @@ void setupCamera() {
     video = new Capture(this, cameras[0]);
     // Or, the settings can be defined based on the text in the list
     //video = new Capture(this, 640, 480, "USB2.0 HD UVC Webcam", 30);
-            
+
     // Start capturing the images from the camera
     video.start();
-  
   }
-  
-
-  backgroundToSubtract = createImage(width, height, RGB);
-  println("Width " + backgroundToSubtract.width);
 }
 
 void keyPressed() {
@@ -87,41 +78,21 @@ void keyPressed() {
     likenessThreshold-=5;
   }
   likenessThreshold = constrain(likenessThreshold, 0, 150);
-  if (key == '1') {
-    mode = 1;
-  } else if (key == '2') {
-    mode = 2;
-  } else if (key == '3') {
-    mode = 3;
-  }
 }
 
 void draw() {
   video.loadPixels();
   image(video, 0, 0);
+  
+  trackColor();
 
-  //Determine type of tracking
-  switch(mode) {
-  case 1:
-    trackColor();
-    break;
-  case 2:
-    setBackground();
-    trackMovement();
-    
-    break;
-  case 3:
-    trackDepth();
-    break;
-  }
-
-  //Show the current likenessThreshold values
+  //Show the current threshold values
   textAlign(RIGHT);
   fill(0);
   textSize(24);
   text("Distance threshold: " + distanceThreshold, width-10, 25);
-  text("Likeness threshold: " + likenessThreshold, width-10, 50);
-  text("Tracking mode: " + mode, width-10, 75);
+  text("Likeness threshold: " + likenessThreshold, width-10, 50);  
+  text("Tracking color: " + red(trackColor) + " " + green(trackColor) + " " + blue(trackColor), width-10, 75);
 }
 
 //Used to calculate distances between points that have 2 dimensions
@@ -138,18 +109,7 @@ float distSq(float x1, float y1, float z1, float x2, float y2, float z2) {
 
 void mousePressed() {
 
-  //Determine type calibration
-  switch(mode) {
-  case 1:
-    setTrackColor();
-    break;
-  case 2:
-    setBackground();
-    break;
-  case 3:
-    setDepth();
-    break;
-  }
+  setTrackColor();
 }
 
 void trackColor() {
@@ -273,146 +233,9 @@ void trackColor() {
   }
 }
 
-void trackMovement() {
-  backgroundToSubtract.loadPixels();
-  ArrayList<Blob> currentBlobs = new ArrayList<Blob>();
-  // Begin loop to walk through every pixel
-  for (int x = 0; x < video.width; x++ ) {
-    for (int y = 0; y < video.height; y++ ) {
-      int loc = x + y * video.width;
-      // Compare color difference to detect movement
-      color currentColor = video.pixels[loc];
-      float r1 = red(currentColor);
-      float g1 = green(currentColor);
-      float b1 = blue(currentColor);
-      color prevColor = backgroundToSubtract.pixels[loc];
-      float r2 = red(prevColor);
-      float g2 = green(prevColor);
-      float b2 = blue(prevColor);
-
-      float d = distSq(r1, g1, b1, r2, g2, b2); 
-
-      if (d < likenessThreshold*likenessThreshold) {
-
-        boolean found = false;
-        for (Blob b : currentBlobs) {
-          if (b.isNear(x, y)) {
-            b.add(x, y);
-            found = true;
-            break;
-          }
-        }
-
-        if (!found) {
-          Blob b = new Blob(x, y);
-          currentBlobs.add(b);
-        }
-      }
-    }
-  }
-
-  for (int i = currentBlobs.size()-1; i >= 0; i--) {
-    if (currentBlobs.get(i).size() < 500) {
-      currentBlobs.remove(i);
-    }
-  }
-
-  // There are no blobs!
-  if (blobs.isEmpty() && currentBlobs.size() > 0) {
-    println("Adding blobs!");
-    for (Blob b : currentBlobs) {
-      b.id = blobCounter;
-      blobs.add(b);
-      blobCounter++;
-    }
-  } else if (blobs.size() <= currentBlobs.size()) {
-    // Match whatever blobs you can match
-
-
-    for (Blob b : blobs) {
-      float recordD = 1000;
-      Blob matched = null;
-      for (Blob cb : currentBlobs) {
-        PVector centerB = b.getCenter();
-        PVector centerCB = cb.getCenter();         
-        float d = PVector.dist(centerB, centerCB);
-        if (d < recordD && !cb.taken) {
-          recordD = d; 
-          matched = cb;
-        }
-      }
-      matched.taken = true;
-      b.become(matched);
-    }
-
-    // Whatever is leftover make new blobs
-    for (Blob b : currentBlobs) {
-      if (!b.taken) {
-        b.id = blobCounter;
-        blobs.add(b);
-        blobCounter++;
-      }
-    }
-  } else if (blobs.size() > currentBlobs.size()) {
-    for (Blob b : blobs) {
-      b.taken = false;
-    }
-
-
-    // Match whatever blobs you can match
-    for (Blob cb : currentBlobs) {
-      float recordD = 1000;
-      Blob matched = null;
-      for (Blob b : blobs) {
-        PVector centerB = b.getCenter();
-        PVector centerCB = cb.getCenter();         
-        float d = PVector.dist(centerB, centerCB);
-        if (d < recordD && !b.taken) {
-          recordD = d; 
-          matched = b;
-        }
-      }
-      if (matched != null) {
-        matched.taken = true;
-        matched.become(cb);
-      }
-    }
-
-    for (int i = blobs.size() - 1; i >= 0; i--) {
-      Blob b = blobs.get(i);
-      if (!b.taken) {
-        if (b.checkLife()) {
-          blobs.remove(i);
-        }
-      }
-    }
-  }
-
-  for (Blob b : blobs) {
-    b.show();
-  }
-}
-
-void trackDepth() {
-  //Missing implementation of Kinect data
-}
-
 void setTrackColor() {
   // Save color where the mouse is clicked in trackColor variable
   int loc = mouseX + mouseY*video.width;
   trackColor = video.pixels[loc];
   println(red(trackColor), green(trackColor), blue(trackColor));
-}
-
-void setBackground() {
-  video.loadPixels();
-  backgroundToSubtract.copy(video, 0, 0, video.width, video.height, 0, 0, backgroundToSubtract.width, backgroundToSubtract.height);
-  backgroundToSubtract.updatePixels();
-  println(backgroundToSubtract.pixels.length);
-  println("Recorded background");
-  
-}
-
-void setDepth() {
-  //Record the depth of the point clicked 
 }
